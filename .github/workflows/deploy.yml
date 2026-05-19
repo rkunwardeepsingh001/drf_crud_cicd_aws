@@ -6,21 +6,40 @@ on:
       - main
 
 jobs:
-  deploy:
+  build:
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
-      - name: Login to Docker Hub
-        run: echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
+      - name: Validate Docker Compose
+        run: docker compose config
 
       - name: Build Docker Image
-        run: docker build -t ${{ secrets.DOCKER_USERNAME }}/drf-app .
+        run: docker build -t drf-app:latest .
 
-      - name: Push Docker Image
-        run: docker push ${{ secrets.DOCKER_USERNAME }}/drf-app
+      - name: Run Django Checks
+        run: docker compose run --rm web python manage.py check
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: build
+    env:
+      APP_DIR: ${{ secrets.EC2_PROJECT_PATH || '/home/ubuntu/drf_crud-django_rivision' }}
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Copy Project to EC2
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ubuntu
+          key: ${{ secrets.EC2_SSH_KEY }}
+          source: "Dockerfile,docker-compose.yml,requirements.txt,manage.py,django_revision,app_one"
+          target: ${{ env.APP_DIR }}
 
       - name: Deploy to EC2
         uses: appleboy/ssh-action@v1.0.0
@@ -28,8 +47,11 @@ jobs:
           host: ${{ secrets.EC2_HOST }}
           username: ubuntu
           key: ${{ secrets.EC2_SSH_KEY }}
+          envs: APP_DIR
           script: |
-            docker pull ${{ secrets.DOCKER_USERNAME }}/drf-app
-            docker stop drf_app || true
-            docker rm drf_app || true
-            docker run -d -p 8000:8000 --env-file .env --name drf_app ${{ secrets.DOCKER_USERNAME }}/drf-app
+            set -e
+
+            cd "$APP_DIR"
+            docker compose up -d --build
+            docker compose exec -T web python manage.py migrate
+            docker compose ps
