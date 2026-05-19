@@ -51,6 +51,18 @@ jobs:
           script: |
             set -e
 
+            if ! command -v docker >/dev/null 2>&1; then
+              sudo apt-get update
+              sudo apt-get install -y ca-certificates curl gnupg docker.io
+            fi
+
+            if ! sudo docker compose version >/dev/null 2>&1; then
+              sudo apt-get update
+              sudo apt-get install -y docker-compose-plugin || sudo apt-get install -y docker-compose-v2
+            fi
+
+            sudo systemctl enable --now docker
+
             cd "$APP_DIR"
             sudo docker compose up -d --build
             sudo docker compose exec -T web python manage.py migrate
